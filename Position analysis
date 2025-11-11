@@ -1,0 +1,290 @@
+% ===================== Peaucellier–Lipkin (cm): POSITION-ONLY =====================
+clear; close all; clc
+
+USER OPTIONS
+unit  = 'cm';
+L_d   = 10;         % cm  (short links: PR, PS, RQ, SQ)
+L_s   = 28;         % cm  (long  links: CR, CS)
+Px0   = 20;         % cm  |CP| เริ่มต้นบนแกน x
+Peak_Drive_Angle_deg = 70;   % deg  แอมพลิจูดมุมขับ (จะปรับอัตโนมัติถ้าขัดเรขาคณิต)
+omega = (pi)/(3*100);     % rad/s  ความถี่มุมของสัญญาณขับ -> ปรับความเร็วการหมุน
+Kfac  = 1.0;        % 1 = Pivot อยู่กึ่งกลาง C↔P (ให้เส้นตรงดีที่สุด)
+write_vid =0;      % 1 = บันทึกวิดีโอ .mp4
+
+AUTO GEOMETRY GUARD
+A_set = deg2rad(Peak_Drive_Angle_deg);
+if Kfac==1 && Px0*cos(A_set/2) < (L_s - L_d)
+    A_req = 2*acos( (L_s - L_d)/Px0 );
+    A_set = min(A_set, A_req);
+    warning('ลด A ให้ปลอดภัยเป็น %.3f deg', rad2deg(A_set));
+elseif Kfac~=1
+    warning('Pivot ไม่กึ่งกลาง (Kfac~=1) → เส้น Q อาจไม่ตรงและการ์ดเรขาคณิตอาจไม่ครอบคลุมทุกมุม');
+end
+fprintf('== Using geometry ==  L_s=%.2f cm, L_d=%.2f cm, Px0=%.2f cm, A=%.2f deg, Kfac=%.2f\n',...
+    L_s,L_d, Px0, rad2deg(A_set), Kfac);
+
+เลือกจุดใหม่ของQ ที่ใกล้กับจุดเก่าของQ
+fx   = Kfac*Px0/2;     % x ของ Pivot F
+L_fl = Px0 - fx;       % |FP|
+theta_circ = linspace(0,2*pi,360);
+pick_closest = @(QQ,Qprev) QQ( find(sum((QQ-Qprev).^2,2)==min(sum((QQ-Qprev).^2,2)),1,'first'), : );
+
+หา R,S,Q เริ่มต้น
+RS0 = circ2circ2(L_d, L_s, Px0, 0, 0, 0);    % (P,L_d) ∩ (C,L_s) เมื่อ P=(Px0,0)
+assert(all(isfinite(RS0(:))), 'เรขาคณิตเริ่มต้นผิด: วงกลม P–C ไม่ตัดกัน');
+if RS0(1,2) >= RS0(2,2), R0 = RS0(1,:); S0 = RS0(2,:); else, R0 = RS0(2,:); S0 = RS0(1,:); end
+
+QQ0 = circ2circ2(L_d, L_d, R0(1), S0(1), R0(2), S0(2));
+assert(all(isfinite(QQ0(:))), 'เรขาคณิตเริ่มต้นผิด: วงกลม R–S ไม่ตัดกัน');
+if QQ0(1,1) >= QQ0(2,1), Q0 = QQ0(1,:); else, Q0 = QQ0(2,:); end
+Qnaught = Q0;
+
+% เก็บข้อมูลตำแหน่ง x และ y ของ Q
+Qx_hist = [];  % เก็บตำแหน่ง x ของ Q
+Qy_hist = [];  % เก็บตำแหน่ง y ของ Q
+Px_hist = [];  % เก็บตำแหน่ง x ของ P
+Py_hist = [];  % เก็บตำแหน่ง y ของ P
+
+% ตั้งค่าการบันทึกวิดีโอ
+if write_vid
+    v = VideoWriter('PL_Linkage_PositionOnly.mp4','MPEG-4'); open(v);
+    fr = getframe(gcf); 
+    for i = 1:10
+        writeVideo(v, fr); 
+    end
+else
+    pause(0.3);
+end
+
+STATIC FIGURE
+figure('Position',[60 110 980 780],'Color','w'); hold on; axis equal
+xmax = L_s + L_d + 2;  set(gca,'Xlim',[-(L_s+2), xmax],'Ylim',[-(L_s+2), (L_s+2)])
+xlabel(['X position (' unit ')']); ylabel(['Y position (' unit ')']);
+title('Peaucellier–Lipkin Straight-Line Linkage (POSITION ONLY)')
+
+% วงอ้างอิง
+plot(L_s*cos(theta_circ), L_s*sin(theta_circ),'Color',[.95 .75 .35],'LineWidth',1.1);        
+plot(fx+L_fl*cos(theta_circ), 0+L_fl*sin(theta_circ),'Color',[.3 .8 1],'LineWidth',1.1);     
+YL = get(gca,'YLim');
+line([Qnaught(1) Qnaught(1)], YL, 'Color',[0 .8 .9], 'LineWidth',1.5);
+
+% สร้างตัวแปรกราฟ (สำหรับอัปเดต)
+hCR = plot([0 R0(1)],[0 R0(2)],'-','Color','r','LineWidth',2);
+hCS = plot([0 S0(1)],[0 S0(2)],'-','Color','r','LineWidth',2);
+hPR = plot([Px0 R0(1)],[0 R0(2)],'-','Color','b','LineWidth',2);
+hPS = plot([Px0 S0(1)],[0 S0(2)],'-','Color','b','LineWidth',2);
+hRQ = plot([R0(1) Q0(1)],[R0(2) Q0(2)],'-','Color','b','LineWidth',2);
+hSQ = plot([S0(1) Q0(1)],[S0(2) Q0(2)],'-','Color','b','LineWidth',2);
+hFP = plot([fx Px0],[0 0],'-','Color',[.45 .85 .9],'LineWidth',6);
+
+hP = text(Px0,0,'  P','FontWeight','bold','FontSize',13);
+hR = text(R0(1)+0.6,R0(2)+0.6,'R','FontWeight','bold','FontSize',13);
+hS = text(S0(1)+0.6,S0(2)-0.6,'S','FontWeight','bold','FontSize',13);
+hQ = text(Q0(1)+0.6,Q0(2)+0.6,'Q','FontWeight','bold','FontSize',13);
+
+% เส้นทาง P และ Q
+hPathP = plot(nan, nan, '-', 'Color',[0 0 0 0.18], 'LineWidth',1.2);
+hPathQ = plot(nan, nan, '-', 'Color',[0 .6 1 .35], 'LineWidth',1.4);
+
+grid on; drawnow;
+
+ANIMATION (กัน NaN + กันสลับสาขา Q) 
+N = write_vid*1000 + (~write_vid)*1500; %ปรับเวลา record ANIMATION
+Q_prev = Q0;   
+Difference = [];
+
+for k = 0:N
+    th = A_set * sin(omega*k);
+    Px = fx + L_fl*cos(th);   Py = L_fl*sin(th);
+    RS = circ2circ2(L_d, L_s, Px, 0, Py, 0);
+
+    if any(~isfinite(RS(:)))  
+        if isempty(Px_hist), continue; end
+        Px = Px_hist(end); Py = Py_hist(end);
+        R = [NaN NaN]; S = [NaN NaN];  
+    else
+        if RS(1,2) >= RS(2,2), R = RS(1,:); S = RS(2,:); else, R = RS(2,:); S = RS(1,:); end
+    end
+
+    QQ = circ2circ2(L_d, L_d, R(1), S(1), R(2), S(2));
+    if all(isfinite(QQ(:))), Q = pick_closest(QQ, Q_prev); Q_prev = Q;
+    else, Q = Q_prev; end
+
+    % เก็บข้อมูลตำแหน่ง
+    Qx_hist(end+1) = Q(1);  Qy_hist(end+1) = Q(2);  Px_hist(end+1) = Px; Py_hist(end+1) = Py;
+
+    % คำนวณความแตกต่างระหว่าง Qx และ Qnaught_x
+    diff = Q(1) - Qnaught(1);  
+    Difference(end+1) = diff;
+
+    % อัปเดตเส้น/ป้าย
+    set(hCR,'XData',[0 R(1)],'YData',[0 R(2)]);
+    set(hCS,'XData',[0 S(1)],'YData',[0 S(2)]);
+    set(hPR,'XData',[Px R(1)],'YData',[Py R(2)]);
+    set(hPS,'XData',[Px S(1)],'YData',[Py S(2)]);
+    set(hRQ,'XData',[R(1) Q(1)],'YData',[R(2) Q(2)]); 
+    set(hSQ,'XData',[S(1) Q(1)],'YData',[S(2) Q(2)]);
+    set(hFP,'XData',[fx Px],'YData',[0 Py]);
+    set(hP,'Position',[Px,Py,0]); 
+    set(hR,'Position',[R(1)+0.6,R(2)+0.6,0]);
+    set(hS,'Position',[S(1)+0.6,S(2)-0.6,0]); 
+    set(hQ,'Position',[Q(1)+0.6,Q(2)+0.6,0]);
+
+    % แสดงเส้นทาง
+    set(hPathP,'XData',Px_hist,'YData',Py_hist);
+    set(hPathQ,'XData',Qx_hist,'YData',Qy_hist);
+
+    % คำนวณความตรง (straightness)
+    LogQ(:,k+1) = [th, 100*(Q(1)-Qnaught(1))/Qnaught(1)];
+    drawnow; if write_vid, writeVideo(v,getframe(gcf)); end
+end
+
+if write_vid, fr=getframe(gcf); for i=1:10, writeVideo(v,fr); end; close(v); end
+
+STRAIGHTNESS CHECK 
+เช็คขนาดของ Qx_hist และ Difference ให้เท่ากันก่อนสร้างตาราง
+if length(Qx_hist) == length(Difference)
+    % สร้างตารางข้อมูล
+    T = table((1:length(Qx_hist)).', Qx_hist.', repmat(Qnaught(1), length(Qx_hist), 1), Difference.', ...
+        'VariableNames', {'Frame', 'Q_x_position', 'Qnaught_x', 'Difference'});
+
+    % แสดงตารางข้อมูล
+    disp(T);
+
+    % ---------- EXPORT CSV (Excel) ----------
+    % บันทึกข้อมูลลงในไฟล์ Excel
+    writetable(T, 'Peaucellier_Lipkin_PositionData.xlsx');
+    fprintf('Exported: Peaucellier_Lipkin_PositionData.xlsx\n');
+else
+    warning('ขนาดของ Qx_hist และ Difference ไม่เท่ากัน!');
+end
+
+EXPORT CSV
+T = table((0:numel(Px_hist)-1).', Px_hist.', Py_hist.', Qx_hist.', Qy_hist.', ...
+    'VariableNames',{'frame','Px_cm','Py_cm','Qx_cm','Qy_cm'});
+writetable(T,'PL_Linkage_PositionOnly_trajectory.csv');
+fprintf('Exported: PL_Linkage_PositionOnly_trajectory.csv\n');
+
+SUPPORT FUNCTIONS
+function P = circ2circ2(Ra, Rb, Xa, Xb, Ya, Yb)
+    % จุดตัดวงกลมสองวง: คืน 2 จุด; ถ้าไม่ตัด -> NaN
+    A = [Xa, Ya];
+    B = [Xb, Yb];
+    b = Ra;
+    a = Rb;
+    c = hypot(B(1) - A(1), B(2) - A(2));
+    if c == 0 || c > a + b || c < abs(a - b)
+        P = [NaN NaN; NaN NaN];
+        return;
+    end
+    cosA = (b^2 + c^2 - a^2) / (2 * b * c);
+    cosA = max(min(cosA, 1), -1);
+    sinA = sqrt(max(1 - cosA^2, 0));
+    u = (B - A) / c;
+    up = [u(2), -u(1)];
+    x = b * cosA;
+    y = b * sinA;
+    P = [A + x * u + y * up; A + x * u - y * up];
+end
+
+SENSITIVITY: ผลของความยาวลิงค์และระยะห่างของ P 
+ทดสอบผลของ L_d (Short link), L_s (Long link) และ Px0 (ระยะห่างจาก Pivot ถึงจุด P) ต่อ RMS deviation ของ Q
+scale_Ld = linspace(0.90, 1.10, 25);  % เปลี่ยนแปลงค่า L_d ในช่วง ±10%
+scale_Ls = linspace(0.90, 1.10, 25);  % เปลี่ยนแปลงค่า L_s ในช่วง ±10%
+scale_Px0 = linspace(0.90, 1.10, 25);  % เปลี่ยนแปลงค่า Px0 ในช่วง ±10%
+
+results_Ld = struct();
+results_Ls = struct();
+results_Px0 = struct();
+
+% --- Helper function to calculate RMS deviation of Q ---
+function RMS = simulate_RMS(Ld, Ls, Px0_local, Kfac_local, A_set_local, omega_local)
+    fx = Kfac_local * Px0_local / 2;
+    L_fl = Px0_local - fx; 
+    num_points = 360;  
+    t_end = 2*pi / omega_local;
+    tvec = linspace(0, t_end, num_points);  
+    pick_closest = @(QQ, Qprev) QQ( find(sum((QQ-Qprev).^2,2)==min(sum((QQ-Qprev).^2,2)),1,'first'), : );
+    
+    % Seed calculation
+    RS0 = circ2circ2(Ld, Ls, Px0_local, 0, 0, 0);
+    if ~(all(isfinite(RS0(:)))), RMS = NaN; return; end
+    if RS0(1,2) >= RS0(2,2), R = RS0(1,:); S = RS0(2,:); else, R = RS0(2,:); S = RS0(1,:); end
+    QQ0 = circ2circ2(Ld, Ld, R(1), S(1), R(2), S(2));
+    if ~(all(isfinite(QQ0(:)))), RMS = NaN; return; end
+    if QQ0(1,1) >= QQ0(2,1), Qprev = QQ0(1,:); else, Qprev = QQ0(2,:); end
+
+    Qx_hist = zeros(1, numel(tvec)); Qy_hist = Qx_hist;
+    for i = 1:numel(tvec)
+        th = A_set_local * sin(omega_local * tvec(i));
+        Px = fx + L_fl * cos(th);   Py = L_fl * sin(th);
+        RS = circ2circ2(Ld, Ls, Px, 0, Py, 0);
+        if any(~isfinite(RS(:))), Q = Qprev; else
+            if RS(1,2) >= RS(2,2), R = RS(1,:); S = RS(2,:); else, R = RS(2,:); S = RS(1,:); end
+            QQ = circ2circ2(Ld, Ld, R(1), S(1), R(2), S(2));
+            if all(isfinite(QQ(:))), Q = pick_closest(QQ, Qprev); else, Q = Qprev; end
+        end
+        Qx_hist(i) = Q(1); Qy_hist(i) = Q(2); Qprev = Q;
+    end
+    % Calculate RMS deviation using a straight line
+    straight_line = Qx_hist;  % Set the straight line as the Qx positions
+    dev = Qy_hist - straight_line;  % Deviation from the straight line
+    RMS = sqrt(mean(dev.^2));  % RMS deviation
+end
+
+% --- Sweep over L_d (Short link) ---
+RMS_Ld = zeros(size(scale_Ld));
+for k = 1:numel(scale_Ld)
+    RMS_Ld(k) = simulate_RMS(L_d * scale_Ld(k), L_s, Px0, Kfac, A_set, omega);
+end
+results_Ld.scale = scale_Ld; 
+results_Ld.RMS = RMS_Ld;
+
+% --- Sweep over L_s (Long link) ---
+RMS_Ls = zeros(size(scale_Ls));
+for k = 1:numel(scale_Ls)
+    RMS_Ls(k) = simulate_RMS(L_d, L_s * scale_Ls(k), Px0, Kfac, A_set, omega);
+end
+results_Ls.scale = scale_Ls; 
+results_Ls.RMS = RMS_Ls;
+
+% --- Sweep over Px0 (Position of P) ---
+RMS_Px0 = zeros(size(scale_Px0));
+for k = 1:numel(scale_Px0)
+    RMS_Px0(k) = simulate_RMS(L_d, L_s, Px0 * scale_Px0(k), Kfac, A_set, omega);
+end
+results_Px0.scale = scale_Px0; 
+results_Px0.RMS = RMS_Px0;
+
+% --- แสดงผลใน Command Window ---
+fprintf('\n=== Sensitivity (RMS deviation of Q) ===\n');
+disp(table(results_Ld.scale.', results_Ld.RMS.', 'VariableNames', {'Ld_scale','RMS_Q'}));
+disp(table(results_Ls.scale.', results_Ls.RMS.', 'VariableNames', {'Ls_scale','RMS_Q'}));
+disp(table(results_Px0.scale.', results_Px0.RMS.', 'VariableNames', {'Px0_scale','RMS_Q'}));
+
+% --- Plotting the Results ---
+figure('Color','w');
+tiledlayout(2,2, 'TileSpacing','compact', 'Padding','compact');
+nexttile;
+plot(scale_Ld, RMS_Ld, '-o', 'LineWidth', 1.6); 
+grid on;
+xlabel('L_d scale');
+ylabel('RMS (cm)');
+title('Sensitivity: L_d');
+axis([min(scale_Ld) max(scale_Ld) min(RMS_Ld) max(RMS_Ld)]);
+
+nexttile;
+plot(scale_Ls, RMS_Ls, '-o', 'LineWidth', 1.6); 
+grid on;
+xlabel('L_s scale');
+ylabel('RMS (cm)');
+title('Sensitivity: L_s');
+axis([min(scale_Ls) max(scale_Ls) min(RMS_Ls) max(RMS_Ls)]);
+
+nexttile;
+plot(scale_Px0, RMS_Px0, '-o', 'LineWidth', 1.6); 
+grid on;
+xlabel('P_{x0} scale');
+ylabel('RMS (cm)');
+title('Sensitivity: Px0');
+axis([min(scale_Px0) max(scale_Px0) min(RMS_Px0) max(RMS_Px0)]);
