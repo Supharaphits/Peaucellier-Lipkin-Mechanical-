@@ -1,1 +1,1 @@
-# Peaucellier-Lipkin-Mechanical-
+# Peaucellier-Lipkin-Mechanical
